@@ -219,19 +219,19 @@ void AFE4490Write (unsigned int address, unsigned long data) {
 	P1OUT &= ~0x04;
 	while (!(UCA0IFG&UCTXIFG));
 	char dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF = address;					   // send address to device
 	while (!(UCA0IFG&UCTXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF =((data >> 16) & 0xFF); 		   // write top 8 bits
 	while (!(UCA0IFG&UCTXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF =((data >> 8) & 0xFF); 		   // write middle 8 bits
 	while (!(UCA0IFG&UCTXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF =(data & 0xFF);
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
