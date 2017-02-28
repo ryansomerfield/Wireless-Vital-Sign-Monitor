@@ -96,7 +96,7 @@ TODO:
 //******************************************************************************
  */
 
-
+#include <stdint.h>
 #include <msp430.h>
 
 #define CONTROL0    0x00
@@ -149,16 +149,27 @@ TODO:
 #define LED2ABSVAL    0x2e
 #define LED1ABSVAL    0x2f
 #define DIAG      0x30
-#define count 60
+
+#define STSE	0x40
+
+long delay;
+void AFE4490Init (void);
+void AFE4490Write (uint8_t address, uint32_t data);
+unsigned long AFE4490Read (uint8_t address);
+
+
+
 
 unsigned long redtemp = 0;
 int state = 0;
+int DRDY_flag = 0;
+int write = 0;
 
 int main(void)
 {
 	volatile unsigned int i;
 
-	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
+   	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
 
 	/*
   Here would not be a bad place to initialize
@@ -167,41 +178,52 @@ int main(void)
 	 */
 
 
-	P3SEL |= BIT3+BIT4;                       // P3.3,4 option select
-	P2SEL |= BIT7;
-	P1SEL &= ~BIT2;                            // P1.2 chip select
-	P1REN &= ~BIT2;
-	P1DIR |= BIT2;
+
 
 	UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
-	UCA0CTL0 |= UCMST+UCSYNC+UCCKPL+UCMSB;    // 3-pin, 8-bit SPI master
-	// Clock polarity high, MSB
+	UCA0CTL0 |= UCMST+UCSYNC+UCCKPL+UCMSB;    // 3-pin, 8-bit SPI master,Clock polarity high, MSB
 	UCA0CTL1 |= UCSSEL_2;                     // SMCLK
-	UCA0BR0 = 0x02;                           // /2
+	UCA0BR0 = 0x10;                           // /16
 	UCA0BR1 = 0;                              //
 	UCA0MCTL = 0;                             // No modulation
+
+	P3SEL |= BIT3+BIT4;                       // P3.3,4 option select
+	P2SEL |= BIT7;
+	P1SEL &= ~(STSE);                            // P1.2 chip select, P1.3 DRDY
+	P1SEL &= ~(BIT3);
+	P1REN |= BIT3;
+	P1DIR |= STSE;
+	P1DIR &= ~(BIT3);
+	P1OUT |= STSE;                            // Chip select off
+
 	UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
 	//UCA0IE |= UCRXIE + UCTXIE;                         // Enable USCI_A0 RX and USCI_A0 TX interrupt
 
-	P1OUT |= 0x04;                            // Chip select off
+
 
 	// Initialize data values
 	AFE4490Init();
 
-
-	__bis_SR_register(GIE);                   // enable interrupts
+	//__bis_SR_register(GIE);                   // enable interrupts
 	//
 	while(1){
-		/*
-	  This is the loop that will run continuously.
-	  Place loop code here.
-		 */
-		redtemp = AFE4490Read(LED1VAL);
-		/*These should be placed in the
-  AFERead / AFE Write functions that will be created below
-  while (~(UCA0IFG&UCTXIFG));                // USCI_A0 TX buffer ready?
-  UCA0TXBUF = MST_Data;                     // Transmit first character
-		 */
+		//if (state){
+		//	write++;
+		//	state = 0;
+		//}
+/*
+		if ((P2IN &= BIT3) == BIT3) {
+			DRDY_flag = 1;
+		}
+		if (DRDY_flag == 1) {
+			redtemp = AFE4490Read(LED1VAL);
+			DRDY_flag = 0;
+		}
+		*/
+		//AFE4490Write(CONTROL0, 0xAA);
+		for (delay=0;delay<10000;delay++){
+			char dummy = P2IN;
+		}
 	}
 }
 
@@ -209,35 +231,58 @@ int main(void)
 __interrupt void USCI_A0_ISR(void)
 {
 	//state = 1;
-	/*
- This is the blink function. Set the state to high here
-	 */
+
 }
 
-void AFE4490Write (unsigned int address, unsigned long data) {
+void AFE4490Write (uint8_t address, uint32_t data) {
 
-	P1OUT &= ~0x04;
+//	P1OUT &= ~STSE;
+//	while (!(UCA0IFG&UCTXIFG));
+//	UCA0IFG &= ~(UCTXIFG);
+//	char dummy = UCA0RXBUF;
+//	UCA0TXBUF = address;					   // send address to device
+//	while (!(UCA0IFG&UCTXIFG));
+//	dummy = UCA0RXBUF;
+//	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
+//	while (!(UCA0IFG&UCTXIFG));
+//	dummy = UCA0RXBUF;
+//	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
+//	while (!(UCA0IFG&UCTXIFG));
+//	dummy = UCA0RXBUF;
+//	UCA0TXBUF =(data);
+//	UCA0IFG &= ~(UCRXIFG);
+//	P1OUT |= STSE;
+
+	P1OUT &= ~STSE;
 	while (!(UCA0IFG&UCTXIFG));
-	char dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+
+	UCA0IFG &= ~(UCRXIFG);
+	//char dummy = UCA0RXBUF;
 	UCA0TXBUF = address;					   // send address to device
-	while (!(UCA0IFG&UCTXIFG));
+
+	while (!(UCA0IFG&UCRXIFG));
+	char dummy = UCA0RXBUF;
+	UCA0IFG &= ~(UCRXIFG);
+	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
+
+	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF =((data >> 16) & 0xFF); 		   // write top 8 bits
-	while (!(UCA0IFG&UCTXIFG));
+	UCA0IFG &= ~(UCRXIFG);
+	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
+
+	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF =((data >> 8) & 0xFF); 		   // write middle 8 bits
-	while (!(UCA0IFG&UCTXIFG));
-	dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF =(data & 0xFF);
+	UCA0IFG &= ~(UCRXIFG);
+	UCA0TXBUF =(data);
+
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
 	UCA0IFG &= ~(UCRXIFG);
 
-	P1OUT |= 0x04;
+	P1OUT |= STSE;
+
+	int i = 100;
+	while(i>=0) {i--;}
 
 }
 
@@ -250,6 +295,9 @@ void AFE4490Init(void) {
 	AFE4490Write(CONTROL0,0x000000);
 
 	AFE4490Write(CONTROL0,0x000008);
+
+//	int i = 1000000;
+//	while(i>=0) {i--;}
 
 	AFE4490Write(TIAGAIN,0x000000); // CF = 5pF, RF = 500kR
 	AFE4490Write(TIA_AMB_GAIN,0x000001);
@@ -290,44 +338,42 @@ void AFE4490Init(void) {
 	AFE4490Write(ADCRSTENDCT2, 0X000FA0); //timer control
 	AFE4490Write(ADCRSTCNT3, 0X001770); //timer control
 	AFE4490Write(ADCRSTENDCT3, 0X001770);
-
-	//delay(1000);
 	// Serial.println("AFE4490 Initialization Done")
 
 }
 
-unsigned long AFE4490Read (unsigned int address)
+unsigned long AFE4490Read (uint8_t address)
 {
-	unsigned long data = 0;
-	char read1;
-	char read2;
-	char read3;
+	unsigned long data = 0x000000;
+	unsigned long read1 = 0x000000;
+	unsigned long read2 = 0x000000;
+	unsigned long read3 = 0x000000;
 
 	AFE4490Write(CONTROL0, 0x000001); // Set bit 0 of CONTROL0 to 1, SPI_Read is enabled
 
-	P1OUT &= ~0x04; // Enable slave
+	P1OUT &= ~STSE; // Enable slave
 	while (!(UCA0IFG&UCTXIFG));
 	char dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF = address;					   // send address to device
 	while (!(UCA0IFG&UCTXIFG));
 	read1 = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF = 0x00;
 	while (!(UCA0IFG&UCTXIFG));
 	read2 = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF = 0x00;
 	while (!(UCA0IFG&UCTXIFG));
 	read3 = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG+UCTXIFG);
+	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
 	UCA0TXBUF = 0x00;
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
 	UCA0IFG &= ~(UCRXIFG);
 
-	P1OUT |= 0x04;
+	P1OUT |= STSE;
 
-	data = (read1 << 16) + (read2 << 8) + read3;
+	data = ((read1 << 16) + (read2 << 8) + read3);
 	return data;
 }
