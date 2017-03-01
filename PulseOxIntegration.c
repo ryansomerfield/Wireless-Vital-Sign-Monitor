@@ -154,8 +154,8 @@ TODO:
 
 long delay;
 void AFE4490Init (void);
-void AFE4490Write (uint8_t address, uint32_t data);
-unsigned long AFE4490Read (uint8_t address);
+void AFE4490Write (unsigned char address, unsigned long data);
+unsigned long AFE4490Read (unsigned char address);
 
 
 
@@ -167,25 +167,22 @@ int write = 0;
 
 int main(void)
 {
-	volatile unsigned int i;
+
 
    	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
-
+    volatile unsigned short Init_i, j;
+       for (j = 0; j < 10; j++)
+       {
+         for ( Init_i =0; Init_i < 20000; Init_i++);
+         for ( Init_i =0; Init_i < 20000; Init_i++);
+         for ( Init_i =0; Init_i < 20000; Init_i++);
+       }
 	/*
   Here would not be a bad place to initialize
   the DRDY Pin. This hardware interrupt will
   need to be configured
 	 */
 
-
-
-
-	UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
-	UCA0CTL0 |= UCMST+UCSYNC+UCCKPL+UCMSB;    // 3-pin, 8-bit SPI master,Clock polarity high, MSB
-	UCA0CTL1 |= UCSSEL_2;                     // SMCLK
-	UCA0BR0 = 0x10;                           // /16
-	UCA0BR1 = 0;                              //
-	UCA0MCTL = 0;                             // No modulation
 
 	P3SEL |= BIT3+BIT4;                       // P3.3,4 option select
 	P2SEL |= BIT7;
@@ -194,7 +191,15 @@ int main(void)
 	P1REN |= BIT3;
 	P1DIR |= STSE;
 	P1DIR &= ~(BIT3);
-	P1OUT |= STSE;                            // Chip select off
+	P1OUT |= STSE;   						// Chip select off
+
+	UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
+	UCA0CTL0 |= UCMSB+UCCKPH+UCMST+UCSYNC;    // 3-pin, 8-bit SPI master,Clock polarity low, MSB
+	UCA0CTL1 |= UCSSEL_2;                     // SMCLK
+	UCA0BR0 = 0x01;                           // /1 = 8MHz
+	UCA0BR1 = 0;                              //
+
+
 
 	UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
 	//UCA0IE |= UCRXIE + UCTXIE;                         // Enable USCI_A0 RX and USCI_A0 TX interrupt
@@ -204,9 +209,11 @@ int main(void)
 	// Initialize data values
 	AFE4490Init();
 
-	//__bis_SR_register(GIE);                   // enable interrupts
+	//redtemp = AFE4490Read(CONTROL1);
+
+	__bis_SR_register(GIE);                   // enable interrupts
 	//
-	while(1){
+	//while(1){
 		//if (state){
 		//	write++;
 		//	state = 0;
@@ -221,10 +228,10 @@ int main(void)
 		}
 		*/
 		//AFE4490Write(CONTROL0, 0xAA);
-		for (delay=0;delay<10000;delay++){
-			char dummy = P2IN;
-		}
-	}
+		//for (delay=0;delay<10000;delay++){
+			//char dummy = P2IN;
+		//}
+	//}
 }
 
 #pragma vector=USCI_A0_VECTOR
@@ -234,70 +241,79 @@ __interrupt void USCI_A0_ISR(void)
 
 }
 
-void AFE4490Write (uint8_t address, uint32_t data) {
-
-//	P1OUT &= ~STSE;
-//	while (!(UCA0IFG&UCTXIFG));
-//	UCA0IFG &= ~(UCTXIFG);
-//	char dummy = UCA0RXBUF;
-//	UCA0TXBUF = address;					   // send address to device
-//	while (!(UCA0IFG&UCTXIFG));
-//	dummy = UCA0RXBUF;
-//	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
-//	while (!(UCA0IFG&UCTXIFG));
-//	dummy = UCA0RXBUF;
-//	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
-//	while (!(UCA0IFG&UCTXIFG));
-//	dummy = UCA0RXBUF;
-//	UCA0TXBUF =(data);
-//	UCA0IFG &= ~(UCRXIFG);
-//	P1OUT |= STSE;
-
+void AFE4490Write (unsigned char address, unsigned long data) {
 	P1OUT &= ~STSE;
-	while (!(UCA0IFG&UCTXIFG));
 
+	while (!(UCA0IFG&UCTXIFG));
 	UCA0IFG &= ~(UCRXIFG);
-	//char dummy = UCA0RXBUF;
 	UCA0TXBUF = address;					   // send address to device
 
 	while (!(UCA0IFG&UCRXIFG));
-	char dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
+	int dummy = UCA0RXBUF;
 	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
 
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
 	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
 
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
 	UCA0TXBUF =(data);
 
 	while (!(UCA0IFG&UCRXIFG));
 	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
 
 	P1OUT |= STSE;
 
-	int i = 100;
-	while(i>=0) {i--;}
-
 }
+/*
+unsigned long AFE4490Read (unsigned char address)
+{
+	unsigned long data;
+	unsigned int read1;
+	unsigned int read2;
+	unsigned int read3;
 
+	AFE4490Write(CONTROL0, 0x000001); // Set bit 0 of CONTROL0 to 1, SPI_Read is enabled
+
+	P1OUT &= ~STSE;
+
+	while (!(UCA0IFG&UCTXIFG));
+	UCA0IFG &= ~(UCRXIFG);
+	UCA0TXBUF = address;					   // send address to device
+
+	while (!(UCA0IFG&UCRXIFG));
+	int dummy = UCA0RXBUF;
+	UCA0TXBUF =(0x00); 		   // write garbage to get back top 8 bits
+
+	while (!(UCA0IFG&UCRXIFG));
+	read1 = UCA0RXBUF;
+	UCA0TXBUF =(0x00); 		   // write middle 8 bits
+
+	while (!(UCA0IFG&UCRXIFG));
+	read2 = UCA0RXBUF;
+	UCA0TXBUF =(0x00);
+
+	while (!(UCA0IFG&UCRXIFG));
+	read3 = UCA0RXBUF;
+
+	P1OUT |= STSE;
+
+
+	AFE4490Write(CONTROL0, 0x000000); // Set bit 0 of CONTROL0 to 0, SPI_Read is disabled
+
+	data = read3;
+	return data;
+}
+*/
 void AFE4490Init(void) {
 
-	//Create the AFEInit() function to initialize
-	//the defaults for the AFE4400 chip.
+	//These initializations were taken from the Open Source Arduino project.
 
 	//Serial.println("AFE4490 Initialization Starts");
 	AFE4490Write(CONTROL0,0x000000);
 
 	AFE4490Write(CONTROL0,0x000008);
-
-//	int i = 1000000;
-//	while(i>=0) {i--;}
 
 	AFE4490Write(TIAGAIN,0x000000); // CF = 5pF, RF = 500kR
 	AFE4490Write(TIA_AMB_GAIN,0x000001);
@@ -338,42 +354,9 @@ void AFE4490Init(void) {
 	AFE4490Write(ADCRSTENDCT2, 0X000FA0); //timer control
 	AFE4490Write(ADCRSTCNT3, 0X001770); //timer control
 	AFE4490Write(ADCRSTENDCT3, 0X001770);
+	for (delay=0;delay<10000;delay++){
+	   	char dummy = P2IN;
+	}
 	// Serial.println("AFE4490 Initialization Done")
 
-}
-
-unsigned long AFE4490Read (uint8_t address)
-{
-	unsigned long data = 0x000000;
-	unsigned long read1 = 0x000000;
-	unsigned long read2 = 0x000000;
-	unsigned long read3 = 0x000000;
-
-	AFE4490Write(CONTROL0, 0x000001); // Set bit 0 of CONTROL0 to 1, SPI_Read is enabled
-
-	P1OUT &= ~STSE; // Enable slave
-	while (!(UCA0IFG&UCTXIFG));
-	char dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = address;					   // send address to device
-	while (!(UCA0IFG&UCTXIFG));
-	read1 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCTXIFG));
-	read2 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCTXIFG));
-	read3 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCRXIFG));
-	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
-
-	P1OUT |= STSE;
-
-	data = ((read1 << 16) + (read2 << 8) + read3);
-	return data;
 }
