@@ -150,9 +150,7 @@ TODO:
 #define LED1ABSVAL    0x2f
 #define DIAG      0x30
 
-#define STSE	0x40
 
-long delay;
 void AFE4490Init (void);
 void AFE4490Write (unsigned char address, unsigned long data);
 unsigned long AFE4490Read (unsigned char address);
@@ -170,13 +168,7 @@ int main(void)
 
 
    	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
-    volatile unsigned short Init_i, j;
-       for (j = 0; j < 10; j++)
-       {
-         for ( Init_i =0; Init_i < 20000; Init_i++);
-         for ( Init_i =0; Init_i < 20000; Init_i++);
-         for ( Init_i =0; Init_i < 20000; Init_i++);
-       }
+
 	/*
   Here would not be a bad place to initialize
   the DRDY Pin. This hardware interrupt will
@@ -184,28 +176,33 @@ int main(void)
 	 */
 
 
-	P3SEL |= BIT3+BIT4;                       // P3.3,4 option select
-	P2SEL |= BIT7;
-	P1SEL &= ~(STSE);                            // P1.2 chip select, P1.3 DRDY
-	P1SEL &= ~(BIT3);
-	P1REN |= BIT3;
-	P1DIR |= STSE;
-	P1DIR &= ~(BIT3);
-	P1OUT |= STSE;   						// Chip select off
+   P4SEL |= BIT1+BIT2+BIT3;  			// Set SPI peripheral bits
+   P4DIR |= BIT0+BIT1+BIT3;			// STE, SCLK, and DOUT as output
+   P4DIR &= ~BIT2;                         	// Din as input
+   P4OUT |=BIT0;				// Set STE high
+   UCB1CTL1 |= UCSWRST;               		// Enable SW reset
+   UCB1CTL0 |= UCMSB+UCCKPH+UCMST+UCSYNC;	// [b0]   1 -  Synchronous mode
+											   // [b2-1] 00-  3-pin SPI
+											   // [b3]   1 -  Master mode
+											   // [b4]   0 - 8-bit data
+											   // [b5]   1 - MSB first
+											   // [b6]   0 - Clock polarity high.
+											   // [b7]   1 - Clock phase - Data is captured on the first UCLK edge and changed on the following edge.
 
-	UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
-	UCA0CTL0 |= UCMSB+UCCKPH+UCMST+UCSYNC;    // 3-pin, 8-bit SPI master,Clock polarity low, MSB
-	UCA0CTL1 |= UCSSEL_2;                     // SMCLK
-	UCA0BR0 = 0x01;                           // /1 = 8MHz
-	UCA0BR1 = 0;                              //
-
-
-
-	UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
-	//UCA0IE |= UCRXIE + UCTXIE;                         // Enable USCI_A0 RX and USCI_A0 TX interrupt
-
+   UCB1CTL1 |= UCSSEL_2;               	// SMCLK
+   UCB1BR0 = 0x01;                             // 8 MHz
+   UCB1BR1 = 0;                                //
+   UCB1CTL1 &= ~UCSWRST;              		// Clear SW reset, resume operation
+   UCB1IE =0x0;
 
 
+   volatile unsigned short Init_i, j;
+   for (j = 0; j < 10; j++)
+   {
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+   }
 	// Initialize data values
 	AFE4490Init();
 
@@ -242,70 +239,129 @@ __interrupt void USCI_A0_ISR(void)
 }
 
 void AFE4490Write (unsigned char address, unsigned long data) {
-	P1OUT &= ~STSE;
+	 unsigned char dummy_rx;
 
-	while (!(UCA0IFG&UCTXIFG));
-	UCA0IFG &= ~(UCRXIFG);
-	UCA0TXBUF = address;					   // send address to device
+	//Set Control0 - Disable SPI Read bit
+	//Write to register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	int dummy = UCA0RXBUF;
-	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
+	UCB1TXBUF = 0;                              // Send the second byte to the TX Buffer: Data[23:16]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	dummy = UCA0RXBUF;
-	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
+	UCB1TXBUF = 0;                              // Send the third byte to the TX Buffer: Data[15:8]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	dummy = UCA0RXBUF;
-	UCA0TXBUF =(data);
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: Data[7:0]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	dummy = UCA0RXBUF;
+	P4OUT|=0x01;  // SEN HIGH
 
-	P1OUT |= STSE;
+	//Write to register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = address;                    // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
+	UCB1TXBUF = (unsigned char)(data >>16);     // Send the second byte to the TX Buffer: Data[23:16]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
+
+	UCB1TXBUF = (unsigned char)(((data & 0x00FFFF) >>8));       // Send the third byte to the TX Buffer: Data[15:8]
+	while ( (UCB1STAT & UCBUSY) );		                // USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			                // Dummy Read Rx buf
+
+	UCB1TXBUF = (unsigned char)(((data & 0x0000FF)));           // Send the first byte to the TX Buffer: Data[7:0]
+	while ( (UCB1STAT & UCBUSY) );		                // USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			                // Dummy Read Rx buf
+
+	P4OUT|=0x01;  // SEN HIGH
 }
-/*
+
 unsigned long AFE4490Read (unsigned char address)
 {
-	unsigned long data;
-	unsigned int read1;
-	unsigned int read2;
-	unsigned int read3;
+	unsigned char dummy_rx;
+	unsigned long retVal, SPI_Rx_buf[10];
 
-	AFE4490Write(CONTROL0, 0x000001); // Set bit 0 of CONTROL0 to 1, SPI_Read is enabled
+	retVal = 0;
 
-	P1OUT &= ~STSE;
+	//Read register and set bit 0 to 1, to enable read
+	//Set Control0 - Enable SPI Read bit
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCTXIFG));
-	UCA0IFG &= ~(UCRXIFG);
-	UCA0TXBUF = address;					   // send address to device
+	UCB1TXBUF = 0;                              // Send the second byte to the TX Buffer: Data[23:16]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	int dummy = UCA0RXBUF;
-	UCA0TXBUF =(0x00); 		   // write garbage to get back top 8 bits
+	UCB1TXBUF = 0;                              // Send the third byte to the TX Buffer: Data[15:8]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	read1 = UCA0RXBUF;
-	UCA0TXBUF =(0x00); 		   // write middle 8 bits
+	UCB1TXBUF = 1;                              // Send the first byte to the TX Buffer: Data[7:0]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	while (!(UCA0IFG&UCRXIFG));
-	read2 = UCA0RXBUF;
-	UCA0TXBUF =(0x00);
+	P4OUT|=0x01;  // set HIGH at end of transmission
 
-	while (!(UCA0IFG&UCRXIFG));
-	read3 = UCA0RXBUF;
+	//Read from register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = address;                    // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[0] = UCB1RXBUF;			// Read Rx buf
 
-	P1OUT |= STSE;
+	UCB1TXBUF = 0;                              // Send the second byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[1] = UCB1RXBUF;			// Read Rx buf: Data[23:16]
+
+	UCB1TXBUF = 0;                              // Send the third byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[2] = UCB1RXBUF;			// Read Rx buf: Data[15:8]
+
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[3] = UCB1RXBUF;			// Read Rx buf: Data[7:0]
+
+	P4OUT|=0x01;  // set HIGH at end of transmission
 
 
-	AFE4490Write(CONTROL0, 0x000000); // Set bit 0 of CONTROL0 to 0, SPI_Read is disabled
+	//Set Control0 - Disable SPI Read bit
+	//Write to register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	data = read3;
-	return data;
+	UCB1TXBUF = 0;                              // Send the second byte to the TX Buffer: Data[23:16]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
+
+	UCB1TXBUF = 0;                              // Send the third byte to the TX Buffer: Data[15:8]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
+
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: Data[7:0]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
+
+	P4OUT|=0x01;  // set HIGH at end of transmission
+
+	retVal = (SPI_Rx_buf[1]<<16)|(SPI_Rx_buf[2]<<8)|(SPI_Rx_buf[3]);
+	return 	retVal;
 }
-*/
+
 void AFE4490Init(void) {
 
 	//These initializations were taken from the Open Source Arduino project.
@@ -354,9 +410,7 @@ void AFE4490Init(void) {
 	AFE4490Write(ADCRSTENDCT2, 0X000FA0); //timer control
 	AFE4490Write(ADCRSTCNT3, 0X001770); //timer control
 	AFE4490Write(ADCRSTENDCT3, 0X001770);
-	for (delay=0;delay<10000;delay++){
-	   	char dummy = P2IN;
-	}
+
 	// Serial.println("AFE4490 Initialization Done")
 
 }
