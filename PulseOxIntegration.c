@@ -95,7 +95,7 @@ TODO:
 //   Built with CCSv4 and IAR Embedded Workbench Version: 4.21
 //******************************************************************************
  */
-
+#include <stdio.h>
 #include <stdint.h>
 #include <msp430.h>
 
@@ -150,122 +150,225 @@ TODO:
 #define LED1ABSVAL    0x2f
 #define DIAG      0x30
 
-#define STSE	0x40
 
 void AFE4490Init (void);
-void AFE4490Write (uint8_t address, uint32_t data);
-unsigned long AFE4490Read (uint8_t address);
+void AFE4490Write (unsigned char address, unsigned long data);
+unsigned long AFE4490Read (unsigned char address);
+void attachInterrupt(void);
+void detachInterrupt(void);
 
 
 
+volatile char DataPacketHeader[16];
+volatile char DataPacketFooter[2];
+volatile int datalen = 135;
+unsigned long time;
 
+volatile static int SPI_RX_Buff_Count = 0;
+volatile char *SPI_RX_Buff_Ptr;
+volatile int Responsebyte = 0;
+volatile unsigned int pckt =0, buff=0,t=0;
+volatile unsigned long int EEG_Ch1_Data[150],EEG_Ch2_Data[150];
+volatile unsigned char datac[150];
+unsigned long ueegtemp = 0, ueegtemp2 = 0, Pkt_Counter=0;
+unsigned long IRtemp,REDtemp;
+signed long seegtemp=0, seegtemp2=0;
+volatile int i;
 unsigned long redtemp = 0;
 int state = 0;
 int DRDY_flag = 0;
-int write = 0;
+//int write = 0;
 
 int main(void)
 {
-	volatile unsigned int i;
+
 
    	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
 
-	/*
+
+
+
+   P4SEL |= BIT1+BIT2+BIT3;  			// Set SPI peripheral bits
+   P4DIR |= BIT0+BIT1+BIT3;			// STE, SCLK, and DOUT as output
+   P4DIR &= ~BIT2;                         	// Din as input
+   P4OUT |=BIT0;				// Set STE high
+   UCB1CTL1 |= UCSWRST;               		// Enable SW reset
+   UCB1CTL0 |= UCMSB+UCCKPH+UCMST+UCSYNC;	// [b0]   1 -  Synchronous mode
+											   // [b2-1] 00-  3-pin SPI
+											   // [b3]   1 -  Master mode
+											   // [b4]   0 - 8-bit data
+											   // [b5]   1 - MSB first
+											   // [b6]   0 - Clock polarity high.
+											   // [b7]   1 - Clock phase - Data is captured on the first UCLK edge and changed on the following edge.
+
+   UCB1CTL1 |= UCSSEL_2;               	// SMCLK
+   UCB1BR0 = 0x01;                             // 8 MHz
+   UCB1BR1 = 0;                                //
+   UCB1CTL1 &= ~UCSWRST;              		// Clear SW reset, resume operation
+   UCB1IE =0x0;
+
+
+   volatile unsigned short Init_i, j;
+   for (j = 0; j < 10; j++)
+   {
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+	 for ( Init_i =0; Init_i < 20000; Init_i++);
+   }
+
+   	/*
   Here would not be a bad place to initialize
   the DRDY Pin. This hardware interrupt will
   need to be configured
 	 */
-
-
-
-
-	UCA0CTL1 |= UCSWRST;                      // **Put state machine in reset**
-	//UCA0CTL0 |= UCMST+UCSYNC+UCCKPL+UCMSB;    // 3-pin, 8-bit SPI master, Clock polarity high, MSB
-	UCA0CTL0 |= UCMST+UCSYNC+UCCKPL+UCMSB;    // 3-pin, 8-bit SPI master
-	UCA0CTL0 &= (~0x10);
-	// Clock polarity low, MSB
-	UCA0CTL1 |= UCSSEL_2;                     // SMCLK
-	UCA0BR0 = 0x10;                           // /16
-	UCA0BR1 = 0;                              //
-	UCA0MCTL = 0;                             // No modulation
-
-	P3SEL |= BIT3+BIT4;                       // P3.3,4 option select
-	P2SEL |= BIT7;
-	P1SEL &= ~(STSE);                            // P1.2 chip select, P1.3 DRDY
-	P1SEL &= ~(BIT3);
-	P1REN |= BIT3;
-	P1DIR |= STSE;
-	P1DIR &= ~(BIT3);
-	P1OUT |= STSE;                            // Chip select off
-
-	UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
-	//UCA0IE |= UCRXIE + UCTXIE;                         // Enable USCI_A0 RX and USCI_A0 TX interrupt
-
+   P2DIR &= ~(0x08);
+   P2REN |= (0x08);                              // Enable P2.3 internal resistance
+   P2OUT |= (0x08);                            	// Set P2.3 as pull-Up resistance
+   P2IES |= (0x08);                              // P2.3 Hi/Lo edge
+   P2IFG &= ~(0x08);                           	// P2.3 IFG cleared
+   P2IE &= ~(0x08);                             	// P2.3 interrupt disabled
 
 
 	// Initialize data values
-	//AFE4490Init();
+	AFE4490Init();
 
-	//__bis_SR_register(GIE);                   // enable interrupts
+	//redtemp = AFE4490Read(CONTROL1);
+
+	__bis_SR_register(GIE);                   // enable interrupts
+
+
+	attachInterrupt();
+
 	//
 	while(1){
-		//if (state){
-		//	write++;
-		//	state = 0;
-		//}
-/*
-		if ((P2IN &= BIT3) == BIT3) {
-			DRDY_flag = 1;
-		}
+		 if (state == 1)   //
+		     {
+		        detachInterrupt();
+		        AFE4490Write(CONTROL0,0x000001);
+		        IRtemp = AFE4490Read(LED1VAL);
+		        AFE4490Write(CONTROL0,0x000001);
+		        REDtemp = AFE4490Read(LED2VAL);
+		        Responsebyte = 1;
 
-		if (DRDY_flag == 1) {
-			redtemp = AFE4490Read(LED1VAL);
-			DRDY_flag = 0;
-		}
-		*/
-		AFE4490Write(CONTROL0, 0xAA);
+		     }
+
+		  if(Responsebyte == 1){
+		      buff = 0;
+		      Pkt_Counter++;
+
+
+		      IRtemp = (unsigned long) (IRtemp<<10);
+		      seegtemp = (signed long) (IRtemp);
+		      seegtemp = (signed long) (seegtemp>>10);
+
+		      REDtemp = (unsigned long) (REDtemp<<10);
+		      seegtemp2 = (signed long) (REDtemp);
+		      seegtemp2 = (signed long) (seegtemp2>>10);
+
+		      DataPacketHeader[0] = 0x0A;
+		      DataPacketHeader[1] = 0xFA;
+		      DataPacketHeader[2] = 0x08;
+		      DataPacketHeader[3] = 0;
+		      DataPacketHeader[4] = 0x02;
+
+
+		      DataPacketHeader[5] = seegtemp;
+		      DataPacketHeader[6] = seegtemp>>8;
+		      DataPacketHeader[7] = seegtemp>>16;
+		      DataPacketHeader[8] = seegtemp>>24;
+
+		      DataPacketHeader[9] = seegtemp2;
+		      DataPacketHeader[10] = seegtemp2>>8;
+		      DataPacketHeader[11] = seegtemp2>>16;
+		      DataPacketHeader[12] = seegtemp2>>24;
+
+		      DataPacketHeader[13] = 0x00;
+		      DataPacketHeader[14] = 0x0b;
+
+
+		      for(i=0; i<15; i++) // transmit the data
+		      {
+		          //Serial.write(DataPacketHeader[i]);
+
+		       }
+		       Responsebyte = 0;
+		       state = 0;
+		       attachInterrupt();
+		  }
+	printf("%lu",REDtemp);
+	printf("%lu",IRtemp);
 	}
 }
 
-#pragma vector=USCI_A0_VECTOR
-__interrupt void USCI_A0_ISR(void)
-{
-	//state = 1;
-
+// Port 2 interrupt service routine
+#pragma vector=PORT2_VECTOR  //DRDY interrupt
+__interrupt void Port_2(void){
+    state = 1;                                 // Set Flag to read AFE44x0 ADC REG data
 }
 
-void AFE4490Write (uint8_t address, uint32_t data) {
+void AFE4490Write (unsigned char address, unsigned long data) {
+	 unsigned char dummy_rx;
+	//Write to register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = address;                    // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
-	P1OUT &= ~STSE;
-	while (!(UCA0IFG&UCTXIFG));
-	char dummy = UCA0RXBUF;
-	UCA0TXBUF = address;					   // send address to device
-	while (!(UCA0IFG&UCTXIFG));
-	dummy = UCA0RXBUF;
-	UCA0TXBUF =((data >> 16)); 		   // write top 8 bits
-	while (!(UCA0IFG&UCTXIFG));
-	dummy = UCA0RXBUF;
-	UCA0TXBUF =((data >> 8)); 		   // write middle 8 bits
-	while (!(UCA0IFG&UCTXIFG));
-	dummy = UCA0RXBUF;
-	UCA0TXBUF =(data);
-	UCA0IFG &= ~(UCRXIFG);
-	P1OUT |= STSE;
+	UCB1TXBUF = (unsigned char)(data >>16);     // Send the second byte to the TX Buffer: Data[23:16]
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			// Dummy Read Rx buf
 
+	UCB1TXBUF = (unsigned char)(((data & 0x00FFFF) >>8));       // Send the third byte to the TX Buffer: Data[15:8]
+	while ( (UCB1STAT & UCBUSY) );		                // USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			                // Dummy Read Rx buf
+
+	UCB1TXBUF = (unsigned char)(((data & 0x0000FF)));           // Send the first byte to the TX Buffer: Data[7:0]
+	while ( (UCB1STAT & UCBUSY) );		                // USCI_B1 TX buffer ready?
+	dummy_rx = UCB1RXBUF;			                // Dummy Read Rx buf
+
+	P4OUT|=0x01;  // SEN HIGH
+}
+
+unsigned long AFE4490Read (unsigned char address)
+{
+	unsigned char dummy_rx;
+	unsigned long retVal, SPI_Rx_buf[10];
+
+	retVal = 0;
+
+	//Read from register - byte wise transfer, 8-Bit transfers
+	P4OUT&= ~0x01;   //  SEN LOW FOR TRANSMISSION.
+	// Loop unrolling for machine cycle optimization
+	UCB1TXBUF = address;                    // Send the first byte to the TX Buffer: Address of register
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[0] = UCB1RXBUF;			// Read Rx buf
+
+	UCB1TXBUF = 0;                              // Send the second byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[1] = UCB1RXBUF;			// Read Rx buf: Data[23:16]
+
+	UCB1TXBUF = 0;                              // Send the third byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[2] = UCB1RXBUF;			// Read Rx buf: Data[15:8]
+
+	UCB1TXBUF = 0;                              // Send the first byte to the TX Buffer: dummy data
+	while ( (UCB1STAT & UCBUSY) );		// USCI_B1 TX buffer ready?
+	SPI_Rx_buf[3] = UCB1RXBUF;			// Read Rx buf: Data[7:0]
+
+	P4OUT|=0x01;  // set HIGH at end of transmission
+
+	retVal = (SPI_Rx_buf[1]<<16)|(SPI_Rx_buf[2]<<8)|(SPI_Rx_buf[3]);
+	return 	retVal;
 }
 
 void AFE4490Init(void) {
 
-	//Create the AFEInit() function to initialize
-	//the defaults for the AFE4400 chip.
+	//These initializations were taken from the Open Source Arduino project.
 
-	//Serial.println("AFE4490 Initialization Starts");
 	AFE4490Write(CONTROL0,0x000000);
 
 	AFE4490Write(CONTROL0,0x000008);
-
-	int i = 100;
-	while(i>=0) {i--;}
 
 	AFE4490Write(TIAGAIN,0x000000); // CF = 5pF, RF = 500kR
 	AFE4490Write(TIA_AMB_GAIN,0x000001);
@@ -306,42 +409,14 @@ void AFE4490Init(void) {
 	AFE4490Write(ADCRSTENDCT2, 0X000FA0); //timer control
 	AFE4490Write(ADCRSTCNT3, 0X001770); //timer control
 	AFE4490Write(ADCRSTENDCT3, 0X001770);
-	// Serial.println("AFE4490 Initialization Done")
 
 }
+void detachInterrupt(void){
+    P2IFG &= ~(0x08);                           	// P2.3 IFG cleared
+    P2IE &= ~(0x08);                             	// P2.3 interrupt disabled
+}
 
-unsigned long AFE4490Read (uint8_t address)
-{
-	unsigned long data = 0x000000;
-	unsigned long read1 = 0x000000;
-	unsigned long read2 = 0x000000;
-	unsigned long read3 = 0x000000;
-
-	AFE4490Write(CONTROL0, 0x000001); // Set bit 0 of CONTROL0 to 1, SPI_Read is enabled
-
-	P1OUT &= ~STSE; // Enable slave
-	while (!(UCA0IFG&UCTXIFG));
-	char dummy = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = address;					   // send address to device
-	while (!(UCA0IFG&UCTXIFG));
-	read1 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCTXIFG));
-	read2 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCTXIFG));
-	read3 = UCA0RXBUF;
-	//UCA0IFG &= ~(UCRXIFG+UCTXIFG);
-	UCA0TXBUF = 0x00;
-	while (!(UCA0IFG&UCRXIFG));
-	dummy = UCA0RXBUF;
-	UCA0IFG &= ~(UCRXIFG);
-
-	P1OUT |= STSE;
-
-	data = ((read1 << 16) + (read2 << 8) + read3);
-	return data;
+void attachInterrupt(void){
+	 P2IFG &= ~(0x08);                           	// P2.3 IFG cleared
+	 P2IE |= (0x08);                             	// P2.3 interrupt enabled
 }
