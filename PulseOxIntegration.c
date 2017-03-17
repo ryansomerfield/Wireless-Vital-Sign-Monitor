@@ -95,8 +95,11 @@ TODO:
 //   Built with CCSv4 and IAR Embedded Workbench Version: 4.21
 //******************************************************************************
  */
+#include <stdio.h>
 #include <stdint.h>
 #include <msp430.h>
+
+
 
 
 #define CONTROL0    0x00
@@ -158,10 +161,21 @@ unsigned long AFE4490Read (unsigned char address);
 
 
 
-unsigned long redtemp = 0;
-int state = 0;
 int DRDY_flag = 0;
-int write = 0;
+
+volatile char DataPacketHeader[16];
+volatile unsigned int buff=0;
+volatile int Responsebyte = 0;
+unsigned long IRtemp;
+unsigned long REDtemp;
+unsigned long Pkt_Counter=0;
+signed long seegtemp=0;
+signed long seegtemp2=0;
+volatile int i;
+
+
+
+
 
 int main(void)
 {
@@ -191,6 +205,7 @@ int main(void)
 
 
 
+
    AFE4490Write(CONTROL0,0x000008);
    volatile unsigned short Init_i, j;
    for (j = 0; j < 10; j++)
@@ -215,8 +230,53 @@ int main(void)
 	//
 	while(1){
 		if (DRDY_flag == 1){
-			DRDY_flag = 0;
+			P2IE &= ~BIT3;								//Disable 2.3's Interrupt
+			AFE4490Write(CONTROL0,0x000001);
+			IRtemp = AFE4490Read(LED1VAL);
+			AFE4490Write(CONTROL0,0x000001);
+			REDtemp = AFE4490Read(LED2VAL);
+			Responsebyte = 1;
 		}
+		if(Responsebyte == 1){
+			  buff = 0;
+			  Pkt_Counter++;
+
+
+			  IRtemp = (unsigned long) (IRtemp<<10);
+			  seegtemp = (signed long) (IRtemp);
+			  seegtemp = (signed long) (seegtemp>>10);
+
+			  REDtemp = (unsigned long) (REDtemp<<10);
+			  seegtemp2 = (signed long) (REDtemp);
+			  seegtemp2 = (signed long) (seegtemp2>>10);
+
+			  DataPacketHeader[0] = 0x0A;
+			  DataPacketHeader[1] = 0xFA;
+			  DataPacketHeader[2] = 0x08;
+			  DataPacketHeader[3] = 0;
+			  DataPacketHeader[4] = 0x02;
+
+
+			  DataPacketHeader[5] = seegtemp;
+			  DataPacketHeader[6] = seegtemp>>8;
+			  DataPacketHeader[7] = seegtemp>>16;
+			  DataPacketHeader[8] = seegtemp>>24;
+
+			  DataPacketHeader[9] = seegtemp2;
+			  DataPacketHeader[10] = seegtemp2>>8;
+			  DataPacketHeader[11] = seegtemp2>>16;
+			  DataPacketHeader[12] = seegtemp2>>24;
+
+			  DataPacketHeader[13] = 0x00;
+			  DataPacketHeader[14] = 0x0b;
+
+			  for(i=0; i<15; i++){ // transmit the data
+				  printf("%c",DataPacketHeader[i]);
+			  }
+			  Responsebyte = 0;
+			  DRDY_flag = 0;
+			  P2IE |= BIT3;								//Enable 2.3's Interrupt
+		  }
 	}
 }
 
@@ -235,6 +295,8 @@ __interrupt void PORT2(void)
 		P2IFG &= 0x00;							//Clear the whole interrupt flag
 	}
 }
+
+
 
 
 void AFE4490Write (unsigned char address, unsigned long data) {
