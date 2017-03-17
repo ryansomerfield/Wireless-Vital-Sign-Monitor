@@ -95,9 +95,9 @@ TODO:
 //   Built with CCSv4 and IAR Embedded Workbench Version: 4.21
 //******************************************************************************
  */
-
 #include <stdint.h>
 #include <msp430.h>
+
 
 #define CONTROL0    0x00
 #define LED2STC     0x01
@@ -166,9 +166,7 @@ int write = 0;
 int main(void)
 {
 
-
    	WDTCTL = WDTPW+WDTHOLD;                   // Stop watchdog timer
-
 
 
 
@@ -202,11 +200,12 @@ int main(void)
 	 for ( Init_i =0; Init_i < 20000; Init_i++);
    }
 
-   	/*
-  Here would not be a bad place to initialize
-  the DRDY Pin. This hardware interrupt will
-  need to be configured
-	 */
+  P2SEL &= ~BIT3; 								//Sets pins 2.3 to I/O function
+  P2DIR &= ~BIT3;							//Clear 2.3 to make it an input
+  P2REN |= BIT3;							//Enable the 2.3 resistor
+  P2OUT |= BIT3;							//Clear 2.3's output
+  P2IE |= BIT3;								//Enable 2.3's Interrupt
+  P2IFG &= ~BIT3;							//Clear the Interrupt Flag
 
 
 	// Initialize data values
@@ -215,16 +214,28 @@ int main(void)
 	__bis_SR_register(GIE);                   // enable interrupts
 	//
 	while(1){
-	//do something
+		if (DRDY_flag == 1){
+			DRDY_flag = 0;
+		}
 	}
 }
 
 #pragma vector=USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void)
-{
-	//state = 1;
+{}
 
+#pragma vector=PORT2_VECTOR
+__interrupt void PORT2(void)
+{
+	if((P2IFG&0x08)==0x08){
+		DRDY_flag = 1;
+		P2IFG &= ~BIT3;							//Clear the Interrupt Flag
+	}
+	else{
+		P2IFG &= 0x00;							//Clear the whole interrupt flag
+	}
 }
+
 
 void AFE4490Write (unsigned char address, unsigned long data) {
 	 unsigned char dummy;
